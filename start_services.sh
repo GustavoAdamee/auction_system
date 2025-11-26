@@ -36,12 +36,29 @@ PIDS+=($!)
 echo -e "${GREEN}✓ Bids MS (porta 8084)${NC}"
 sleep 2
 
+cd "$SCRIPT_DIR/payment_microservice"
+go run . > /dev/null 2>&1 &
+PIDS+=($!)
+echo -e "${GREEN}✓ Payment MS (porta 8093)${NC}"
+sleep 2
+
+cd "$SCRIPT_DIR/external_payment_system"
+[ ! -d "venv" ] && python3 -m venv venv
+source venv/bin/activate
+pip install -q -r requirements.txt 2>/dev/null
+python main.py > /dev/null 2>&1 &
+PIDS+=($!)
+deactivate
+echo -e "${GREEN}✓ External Payment System (porta 8092)${NC}"
+sleep 2
+
 cd "$SCRIPT_DIR/api_gateway"
 [ ! -d "venv" ] && python3 -m venv venv
 source venv/bin/activate
 pip install -q -r requirements.txt 2>/dev/null
 python main.py > /dev/null 2>&1 &
 PIDS+=($!)
+deactivate
 echo -e "${GREEN}✓ API Gateway (porta 8081)${NC}"
 sleep 2
 

@@ -239,6 +239,8 @@ function connectSSE() {
     eventSource.addEventListener('new_bid', handleNewBid);
     eventSource.addEventListener('invalid_bid', handleInvalidBid);
     eventSource.addEventListener('auction_winner', handleAuctionWinner);
+    eventSource.addEventListener('payment_link', handlePaymentLink);
+    eventSource.addEventListener('payment_status', handlePaymentStatus);
     
     eventSource.onopen = function() {
         updateSSEStatus(true);
@@ -301,6 +303,33 @@ function handleAuctionWinner(event) {
     }
 }
 
+function handlePaymentLink(event) {
+    try {
+        const data = JSON.parse(event.data);
+        const eventData = typeof data.data === 'string' ? JSON.parse(data.data) : data.data;
+        addEventToLog('payment_link', 'Link de Pagamento', eventData);
+        if (eventData.payment_link) {
+            showAlert(`Link de pagamento disponível para ${eventData.auction_id}`, 'info');
+        }
+    } catch (error) {
+        console.error('Erro ao processar payment_link:', error);
+    }
+}
+
+function handlePaymentStatus(event) {
+    try {
+        const data = JSON.parse(event.data);
+        const eventData = typeof data.data === 'string' ? JSON.parse(data.data) : data.data;
+        addEventToLog('payment_status', 'Status do Pagamento', eventData);
+        if (eventData.status) {
+            const statusText = eventData.status === 'approved' ? 'aprovado' : 'recusado';
+            showAlert(`Pagamento ${statusText} para ${eventData.auction_id}`, eventData.status === 'approved' ? 'success' : 'error');
+        }
+    } catch (error) {
+        console.error('Erro ao processar payment_status:', error);
+    }
+}
+
 function addEventToLog(type, title, data) {
     const logDiv = document.getElementById('eventsLog');
     const eventDiv = document.createElement('div');
@@ -320,6 +349,14 @@ function addEventToLog(type, title, data) {
         eventHtml += `Lance inválido: R$ ${data.bid} - Cliente: ${data.client_id}`;
     } else if (type === 'auction_winner') {
         eventHtml += `Vencedor: ${data.client_id} - Lance: R$ ${data.bid}`;
+    } else if (type === 'payment_link') {
+        if (data.payment_link) {
+            eventHtml += `Link: <a href="${data.payment_link}" target="_blank">Abrir Pagamento</a>`;
+        } else {
+            eventHtml += 'Link de pagamento disponível';
+        }
+    } else if (type === 'payment_status') {
+        eventHtml += `Resultado: ${data.status === 'approved' ? 'Aprovado' : 'Recusado'} (Transação: ${data.transaction_id})`;
     }
     
     eventHtml += '</div>';

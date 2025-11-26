@@ -34,7 +34,9 @@ class APIGateway:
             exchanges = [
                 ('valid_bids_exchange', 'direct'),
                 ('invalid_bids_exchange', 'direct'),
-                ('winner_auction_exchange', 'direct')
+                ('winner_auction_exchange', 'direct'),
+                ('payment_link_exchange', 'direct'),
+                ('payment_status_exchange', 'direct')
             ]
             
             for exchange_name, exchange_type in exchanges:
@@ -82,6 +84,22 @@ class APIGateway:
             'api_gateway_winner_auction_queue',
             self.handle_winner_auction
         )
+        
+        # Payment link events
+        self.consume_events(
+            'payment_link_exchange',
+            'payment_link_routing_key',
+            'api_gateway_payment_link_queue',
+            self.handle_payment_link
+        )
+        
+        # Payment status events
+        self.consume_events(
+            'payment_status_exchange',
+            'payment_status_routing_key',
+            'api_gateway_payment_status_queue',
+            self.handle_payment_status
+        )
     
     def consume_events(self, exchange, routing_key, queue_name, callback):
         """Setup event consumption"""
@@ -97,7 +115,7 @@ class APIGateway:
             
             def on_message(ch, method, properties, body):
                 try:
-                    # Decode body if it's bytes (pika sometimes returns bytes, sometimes str)
+                    # Decode body if it's bytes
                     if isinstance(body, bytes):
                         body_str = body.decode('utf-8')
                     else:
@@ -163,8 +181,30 @@ class APIGateway:
         except Exception as e:
             print(f"Error processing winner_auction: {e}")
     
+    def handle_payment_link(self, body):
+        """Process payment link event"""
+        try:
+            event = json.loads(body)
+            event['event_type'] = 'payment_link'
+            client_id = event.get('client_id') or event.get('winner_id')
+            if client_id:
+                self.broadcast_sse_to_client(client_id, 'payment_link', event)
+        except Exception as e:
+            print(f"Error processing payment_link: {e}")
+    
+    def handle_payment_status(self, body):
+        """Process payment status event"""
+        try:
+            event = json.loads(body)
+            event['event_type'] = 'payment_status'
+            client_id = event.get('client_id') or event.get('winner_id')
+            if client_id:
+                self.broadcast_sse_to_client(client_id, 'payment_status', event)
+        except Exception as e:
+            print(f"Error processing payment_status: {e}")
+    
     def broadcast_sse_to_client(self, client_id, event_type, data):
-        """Broadcast SSE event to a specific client"""
+        """Broadcast SSE event to a specific client (Invalid bid)"""
         message = {
             "event": event_type,
             "data": data
@@ -178,7 +218,9 @@ class APIGateway:
             "event_id": self.event_id_counter,
             "payload": json_data
         }
-        
+
+        # Broadcast to all clients registered for the auction
+        # add the message to the client's queue
         for auction_id, clients in list(self.sse_clients.items()):
             for client_info in list(clients):
                 if isinstance(client_info, tuple):
@@ -190,7 +232,7 @@ class APIGateway:
                             pass
     
     def broadcast_sse_to_auction(self, auction_id, event_type, data):
-        """Broadcast SSE event to clients registered for a specific auction"""
+        """Broadcast SSE event to clients registered for a specific auction (New valid bid)"""
         if auction_id not in self.client_interests or not self.client_interests[auction_id]:
             return
         
@@ -332,6 +374,7 @@ def handle_sse(auction_id):
         return jsonify({"error": "Auction ID is required"}), 400
     
     client_id = request.args.get('client_id')
+    # create a queue for the client to receive events (new valid bid, invalid bid, auction winner)
     client_queue = gateway.add_sse_client(auction_id, client_id)
     
     def generate():
@@ -340,9 +383,10 @@ def handle_sse(auction_id):
         yield ": keepalive\n\n"
         
         try:
+            # loop forever to receive events from the client's queue
             while True:
                 try:
-                    sse_message = client_queue.get(timeout=60)
+                    sse_message = client_queue.get(timeout=60)  # espera 60 segundos por msg
                     # Format SSE according to specification:
                     # event: <event_type>
                     # id: <event_id>
